@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#FFCC00">
-<title>Deutsch Trainer</title>
+<title>Deutsch Trainer · Cloud</title>
+
+<!-- Підключаємо бібліотеку Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <script>
 try{var t=localStorage.getItem('deua.settings');if(t){var s=JSON.parse(t);if(s&&s.theme)document.documentElement.dataset.theme=s.theme;}}catch(e){}
 </script>
@@ -101,9 +105,9 @@ main{max-width:760px;margin:0 auto;padding:24px 20px calc(70px + env(safe-area-i
 .modal-body{padding:20px 24px 24px}
 .field{margin-bottom:18px}.field:last-child{margin-bottom:0}
 .field label{display:block;margin-bottom:8px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.field select,.field textarea{width:100%;padding:12px 14px;font-size:15px;font-weight:600;color:var(--fg);background:var(--card);border:2px solid var(--line);border-radius:12px;outline:none}
+.field select,.field textarea,.field input[type="email"],.field input[type="password"]{width:100%;padding:12px 14px;font-size:15px;font-weight:600;color:var(--fg);background:var(--card);border:2px solid var(--line);border-radius:12px;outline:none}
 .field textarea{min-height:110px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;resize:vertical}
-.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.field select:focus,.field textarea:focus,.field input:focus{border-color:var(--accent)}
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:100;transform:translateX(-50%) translateY(20px);padding:12px 22px;font-size:14px;font-weight:700;color:#000;background:var(--accent);border-radius:999px;opacity:0;pointer-events:none;transition:.25s}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 @media (max-width:640px){.topbar{padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;gap:8px}.tabs{order:3;flex-basis:100%;margin-left:0}.icon-btn{margin-left:auto}.brand{font-size:15px}.level-filter{padding:12px 14px 0}main{padding:20px 14px calc(60px + env(safe-area-inset-bottom,0px))}.card-scene{height:290px}.btn-row{grid-template-columns:1fr}}
@@ -133,7 +137,6 @@ main{max-width:760px;margin:0 auto;padding:24px 20px calc(70px + env(safe-area-i
 </div>
 
 <main>
-
   <section class="view active" id="view-cards">
     <div class="row-between">
       <span class="counter" id="cardsCounter">Вивчено 0 / 0</span>
@@ -253,7 +256,6 @@ main{max-width:760px;margin:0 auto;padding:24px 20px calc(70px + env(safe-area-i
     <div class="stat-card"><h3>Розподіл SRS</h3><div id="statsSRS"></div></div>
     <div class="stat-card"><h3>Останні спроби</h3><div id="statsHistory"></div></div>
   </section>
-
 </main>
 
 <div class="modal-overlay" id="settingsModal" hidden>
@@ -263,6 +265,26 @@ main{max-width:760px;margin:0 auto;padding:24px 20px calc(70px + env(safe-area-i
       <button class="modal-close" id="settingsClose">×</button>
     </div>
     <div class="modal-body">
+      
+      <!-- БЛОК АКАУНТУ -->
+      <div class="field" style="border-bottom: 2px dashed var(--line); padding-bottom: 18px; margin-bottom: 24px;">
+        <label style="color: var(--accent);">☁️ Хмарна синхронізація</label>
+        <div id="authLoggedOut">
+          <p class="muted" style="font-size:12px; margin:0 0 12px;">Увійдіть, щоб не втратити прогрес при очищенні браузера.</p>
+          <input type="email" id="authEmail" placeholder="Email" style="margin-bottom:8px">
+          <input type="password" id="authPass" placeholder="Пароль" style="margin-bottom:10px">
+          <div class="btn-row">
+            <button class="btn" id="btnLogin">Увійти</button>
+            <button class="btn primary" id="btnRegister">Реєстрація</button>
+          </div>
+        </div>
+        <div id="authLoggedIn" hidden>
+          <p style="font-size:14px; margin:0 0 12px;">Ви увійшли як:<br><b id="userEmail" style="color:var(--fg);"></b></p>
+          <button class="btn danger full" id="btnLogout">Вийти з акаунту</button>
+        </div>
+      </div>
+      <!-- КІНЕЦЬ БЛОКУ АКАУНТУ -->
+
       <div class="field">
         <label>Питань у вікторині</label>
         <select id="settingQuizLength"><option>5</option><option>10</option><option>20</option><option>50</option></select>
@@ -297,7 +319,7 @@ main{max-width:760px;margin:0 auto;padding:24px 20px calc(70px + env(safe-area-i
 <div class="toast" id="toast"></div>
 
 <script>
-/* ===== 1. СЛОВНИК (компактний формат) ===== */
+/* ===== 1. СЛОВНИК ===== */
 const RAW_A1 = `Hallo|привіт|A1
 Tschüss|бувай|A1
 Danke|дякую|A1
@@ -707,13 +729,9 @@ function parsePack(raw){
     return {de,ua,article,level};
   }).filter(Boolean);
 }
+const BUILTIN_WORDS=[...parsePack(RAW_A1),...parsePack(RAW_A2),...parsePack(RAW_B1),...parsePack(RAW_B2)];
 
-const BUILTIN_WORDS=[
-  ...parsePack(RAW_A1),...parsePack(RAW_A2),
-  ...parsePack(RAW_B1),...parsePack(RAW_B2)
-];
-
-/* ===== 2. ГРАМАТИКА (18 уроків) ===== */
+/* ===== 2. ГРАМАТИКА ===== */
 const LESSONS = [
 {id:'pronouns',title:'Займенники',level:'A0',
  theory:`<h3>Nominativ</h3><p><b>ich</b> я · <b>du</b> ти · <b>er</b> він · <b>sie</b> вона · <b>es</b> воно · <b>wir</b> ми · <b>ihr</b> ви · <b>sie</b> вони · <b>Sie</b> Ви</p>`,
@@ -902,7 +920,20 @@ const SRS_MASTERED=5;
 const KEYS={words:'deua.words',custom:'deua.custom',grammar:'deua.grammar',settings:'deua.settings',streak:'deua.streak',history:'deua.history'};
 const DEF_SETTINGS={theme:'light',level:'all',quizLength:10,typingLength:10};
 
-/* ===== 3. УТИЛІТИ ===== */
+/* ===== 3. СУПАБЕЙС НАЛАШТУВАННЯ ===== */
+/* УВАГА: Замініть ці два рядки на свої ключі з Supabase (Project Settings -> API) */
+const SUPABASE_URL = 'https://rhuxgfhsukehrdjzinnr.supabase.co/rest/v1/';
+const SUPABASE_KEY = 'sb_publishable_XUygMypyKRn8b3UsvZKPlQ_IPRClS4c';
+
+let supabaseClient = null;
+let currentUser = null;
+let syncTimeout = null;
+
+if (window.supabase && SUPABASE_URL !== 'ВАШ_PROJECT_URL') {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+}
+
+/* ===== 4. УТИЛІТИ ===== */
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
@@ -913,7 +944,7 @@ const daysAgo=ts=>(Date.now()-ts)/86400000;
 function load(k,f){try{const r=localStorage.getItem(k);return r===null?f:JSON.parse(r);}catch(e){return f;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
 
-/* ===== 4. СТАН ===== */
+/* ===== 5. СТАН ===== */
 const CUSTOM_WORDS=load(KEYS.custom,[]);
 const WORDS=[...BUILTIN_WORDS,...(Array.isArray(CUSTOM_WORDS)?CUSTOM_WORDS:[])];
 
@@ -924,16 +955,98 @@ const state={
   streak:load(KEYS.streak,{lastDate:'',current:0,longest:0}),
   history:load(KEYS.history,{quiz:[],typing:[],grammar:[]})
 };
-function saveAll(){save(KEYS.words,state.words);save(KEYS.grammar,state.grammar);save(KEYS.settings,state.settings);save(KEYS.streak,state.streak);save(KEYS.history,state.history);}
 
-/* ===== 5. SRS ===== */
+function saveAllLocalOnly(){
+  save(KEYS.words,state.words);save(KEYS.grammar,state.grammar);
+  save(KEYS.settings,state.settings);save(KEYS.streak,state.streak);save(KEYS.history,state.history);
+}
+
+function saveAll(){
+  saveAllLocalOnly();
+  if (currentUser && supabaseClient) {
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(async () => {
+      const payload = { words: state.words, grammar: state.grammar, streak: state.streak, history: state.history };
+      await supabaseClient.from('profiles').upsert({ id: currentUser.id, data: payload });
+    }, 1500); // Затримка 1.5с, щоб не спамити сервер при кожному кліку
+  }
+}
+
+/* ===== СУПАБЕЙС ЛОГІКА ===== */
+async function initAuth() {
+  if (!supabaseClient) return;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session) {
+    currentUser = session.user;
+    updateAuthUI();
+    await loadFromCloud();
+  }
+}
+
+async function login(email, pass) {
+  if (!supabaseClient) return toast('Спочатку налаштуйте Supabase у коді.');
+  const btn = $('#btnLogin'); btn.disabled = true; btn.textContent = '...';
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pass });
+  btn.disabled = false; btn.textContent = 'Увійти';
+  if (error) return alert('Помилка входу: ' + error.message);
+  currentUser = data.user;
+  updateAuthUI();
+  await loadFromCloud();
+  toast('Вітаємо! Прогрес завантажено.');
+}
+
+async function register(email, pass) {
+  if (!supabaseClient) return toast('Спочатку налаштуйте Supabase у коді.');
+  if (pass.length < 6) return alert('Пароль має бути мінімум 6 символів.');
+  const btn = $('#btnRegister'); btn.disabled = true; btn.textContent = '...';
+  const { data, error } = await supabaseClient.auth.signUp({ email, password: pass });
+  btn.disabled = false; btn.textContent = 'Реєстрація';
+  if (error) return alert('Помилка реєстрації: ' + error.message);
+  alert('Акаунт створено! Тепер натисніть "Увійти". (Якщо не пускає - перевірте пошту).');
+}
+
+async function logout() {
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+  currentUser = null;
+  updateAuthUI();
+  toast('Ви вийшли з акаунту');
+}
+
+async function loadFromCloud() {
+  if (!currentUser || !supabaseClient) return;
+  const { data, error } = await supabaseClient.from('profiles').select('data').eq('id', currentUser.id).single();
+  if (data && data.data) {
+    state.words = data.data.words || {};
+    state.grammar = data.data.grammar || {};
+    state.streak = data.data.streak || state.streak;
+    state.history = data.data.history || state.history;
+    saveAllLocalOnly();
+    cardsState.deck = [];
+    renderCards(); renderGrammarList();
+    if(document.body.dataset.view === 'stats') renderStats();
+  }
+}
+
+function updateAuthUI() {
+  if (currentUser) {
+    $('#authLoggedOut').hidden = true;
+    $('#authLoggedIn').hidden = false;
+    $('#userEmail').textContent = currentUser.email;
+  } else {
+    $('#authLoggedOut').hidden = false;
+    $('#authLoggedIn').hidden = true;
+  }
+}
+
+/* ===== 6. SRS ===== */
 function getW(de){return state.words[de]||{box:0,lastSeen:0,correct:0,wrong:0};}
 function getBox(de){return getW(de).box;}
 function isDue(de){const s=getW(de);if(s.box===0)return true;if(s.box>=SRS_MASTERED)return false;return daysAgo(s.lastSeen)>=SRS_INTERVALS[s.box];}
-function advanceBox(de){const s=getW(de);s.box=Math.min(s.box+1,SRS_MASTERED);s.lastSeen=Date.now();s.correct=(s.correct||0)+1;state.words[de]=s;save(KEYS.words,state.words);}
-function resetBox(de){const s=getW(de);s.box=0;s.lastSeen=Date.now();s.wrong=(s.wrong||0)+1;state.words[de]=s;save(KEYS.words,state.words);}
+function advanceBox(de){const s=getW(de);s.box=Math.min(s.box+1,SRS_MASTERED);s.lastSeen=Date.now();s.correct=(s.correct||0)+1;state.words[de]=s;saveAll();}
+function resetBox(de){const s=getW(de);s.box=0;s.lastSeen=Date.now();s.wrong=(s.wrong||0)+1;state.words[de]=s;saveAll();}
 
-/* ===== 6. СТРІК ===== */
+/* ===== 7. СТРІК ===== */
 function markActive(){
   const today=todayISO();
   if(state.streak.lastDate===today)return;
@@ -941,10 +1054,10 @@ function markActive(){
   if(state.streak.lastDate===yest)state.streak.current++;else state.streak.current=1;
   state.streak.lastDate=today;
   state.streak.longest=Math.max(state.streak.longest,state.streak.current);
-  save(KEYS.streak,state.streak);
+  saveAll();
 }
 
-/* ===== 7. TTS ===== */
+/* ===== 8. TTS ===== */
 let ttsWarned=false;
 function speak(text){
   if(!('speechSynthesis' in window)){if(!ttsWarned){toast('Немає синтезу мовлення');ttsWarned=true;}return;}
@@ -955,9 +1068,8 @@ function speak(text){
   if(de)u.voice=de;
   speechSynthesis.cancel();speechSynthesis.speak(u);
 }
-if('speechSynthesis' in window){speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{};}
 
-/* ===== 8. ТЕМА ===== */
+/* ===== 9. ТЕМА ===== */
 function applyTheme(theme){
   document.documentElement.dataset.theme=theme;
   $('#themeToggle').textContent=theme==='dark'?'☀':'☾';
@@ -967,13 +1079,13 @@ $('#themeToggle').addEventListener('click',()=>{
   applyTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
 });
 
-/* ===== 9. TOAST ===== */
+/* ===== 10. TOAST ===== */
 function toast(msg){
   const el=$('#toast');el.textContent=msg;el.classList.add('show');
-  clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2000);
+  clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2500);
 }
 
-/* ===== 10. НАВІГАЦІЯ ===== */
+/* ===== 11. НАВІГАЦІЯ ===== */
 function switchView(name){
   document.body.dataset.view=name;
   $$('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===name));
@@ -986,7 +1098,7 @@ function switchView(name){
 }
 $$('.tab').forEach(t=>t.addEventListener('click',()=>switchView(t.dataset.view)));
 
-/* ===== 11. ФІЛЬТР ===== */
+/* ===== 12. ФІЛЬТР ===== */
 function filteredWords(){
   const l=state.settings.level;
   return l==='all'?WORDS:WORDS.filter(w=>w.level===l);
@@ -1000,7 +1112,7 @@ function applyLevelFilter(level){
 }
 $$('#levelFilter .chip').forEach(c=>c.addEventListener('click',()=>applyLevelFilter(c.dataset.level)));
 
-/* ===== 12. КАРТКИ ===== */
+/* ===== 13. КАРТКИ ===== */
 const cardsState={deck:[],current:null,flipped:false};
 function buildDeck(){
   const pool=filteredWords().filter(w=>getBox(w.de)<SRS_MASTERED);
@@ -1039,11 +1151,11 @@ $('#btnRepeat').addEventListener('click',e=>{e.currentTarget.blur();markRepeat()
 $('#resetLevelBtn').addEventListener('click',()=>{
   if(!confirm('Скинути прогрес цього рівня?'))return;
   filteredWords().forEach(w=>{delete state.words[w.de];});
-  save(KEYS.words,state.words);
+  saveAll();
   cardsState.deck=[];renderCards();toast('Скинуто');
 });
 
-/* ===== 13. ГАРЯЧІ КЛАВІШІ ===== */
+/* ===== 14. ГАРЯЧІ КЛАВІШІ ===== */
 document.addEventListener('keydown',e=>{
   if(e.repeat)return;
   const tag=(e.target.tagName||'').toLowerCase();
@@ -1055,7 +1167,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='2'){markRepeat();}
 });
 
-/* ===== 14. ВІКТОРИНА ===== */
+/* ===== 15. ВІКТОРИНА ===== */
 const quizState={queue:[],index:0,score:0,locked:false,mistakes:[]};
 function startQuiz(){
   const pool=filteredWords();
@@ -1117,11 +1229,11 @@ function renderQuizResult(){
   }else box.hidden=true;
   state.history.quiz.unshift({score:s,total,date:todayISO(),ts:Date.now()});
   state.history.quiz=state.history.quiz.slice(0,10);
-  save(KEYS.history,state.history);
+  saveAll();
 }
 $('#quizRestart').addEventListener('click',startQuiz);
 
-/* ===== 15. ВВІД ===== */
+/* ===== 16. ВВІД ===== */
 const typingState={queue:[],index:0,score:0,answered:false};
 function normalize(s){
   return s.toLowerCase().trim()
@@ -1198,14 +1310,14 @@ function renderTypingResult(){
   $('#typeResultText').textContent=msg;
   state.history.typing.unshift({score:s,total,date:todayISO(),ts:Date.now()});
   state.history.typing=state.history.typing.slice(0,10);
-  save(KEYS.history,state.history);
+  saveAll();
 }
 $('#typeAction').addEventListener('click',e=>{e.currentTarget.blur();typingState.answered?nextTyping():checkTyping();});
 $('#typeShowAnswer').addEventListener('click',e=>{e.currentTarget.blur();showTypingAnswer();});
 $('#typeInput').addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();typingState.answered?nextTyping():checkTyping();});
 $('#typeRestart').addEventListener('click',startTyping);
 
-/* ===== 16. ГРАМАТИКА ===== */
+/* ===== 17. ГРАМАТИКА ===== */
 const grammarState={currentLessonId:null,queue:[],index:0,score:0,locked:false};
 
 function renderGrammarList(){
@@ -1316,7 +1428,7 @@ function renderGrammarResult(){
   markActive();
   state.history.grammar.unshift({lesson:lesson.title,score:s,total,date:todayISO(),ts:Date.now()});
   state.history.grammar=state.history.grammar.slice(0,10);
-  save(KEYS.history,state.history);
+  saveAll();
 }
 $('#lessonBack').addEventListener('click',backToList);
 $('#lessonStart').addEventListener('click',startLessonPlay);
@@ -1329,7 +1441,7 @@ $('#grammarNextLesson').addEventListener('click',e=>{
   else backToList();
 });
 
-/* ===== 17. СТАТИСТИКА ===== */
+/* ===== 18. СТАТИСТИКА ===== */
 function renderStats(){
   const mastered=WORDS.filter(w=>getBox(w.de)>=SRS_MASTERED).length;
   $('#statsMastered').textContent=`${mastered} / ${WORDS.length}`;
@@ -1365,7 +1477,7 @@ function renderStats(){
   else hist.innerHTML=all.map(h=>`<div class="stat-row"><span>${h.type} · ${h.date}</span><span class="value">${h.score}/${h.total}</span></div>`).join('');
 }
 
-/* ===== 18. НАЛАШТУВАННЯ ===== */
+/* ===== 19. НАЛАШТУВАННЯ ===== */
 function openSettings(){
   $('#settingsModal').hidden=false;
   $('#settingQuizLength').value=state.settings.quizLength;
@@ -1377,6 +1489,10 @@ $('#settingsClose').addEventListener('click',closeSettings);
 $('#settingsModal').addEventListener('click',e=>{if(e.target.id==='settingsModal')closeSettings();});
 $('#settingQuizLength').addEventListener('change',e=>{state.settings.quizLength=+e.target.value;save(KEYS.settings,state.settings);toast('Збережено');});
 $('#settingTypingLength').addEventListener('change',e=>{state.settings.typingLength=+e.target.value;save(KEYS.settings,state.settings);toast('Збережено');});
+
+$('#btnLogin').addEventListener('click',()=>login($('#authEmail').value,$('#authPass').value));
+$('#btnRegister').addEventListener('click',()=>register($('#authEmail').value,$('#authPass').value));
+$('#btnLogout').addEventListener('click',logout);
 
 $('#customWordsAdd').addEventListener('click',()=>{
   const area=$('#customWordsArea');
@@ -1436,13 +1552,16 @@ $('#resetAllBtn').addEventListener('click',()=>{
   toast('Скинуто');closeSettings();
 });
 
-/* ===== 19. ІНІЦІАЛІЗАЦІЯ ===== */
-(function init(){
+/* ===== 20. ІНІЦІАЛІЗАЦІЯ ===== */
+(async function init(){
   if(!localStorage.getItem(KEYS.settings)&&window.matchMedia('(prefers-color-scheme: dark)').matches)
     state.settings.theme='dark';
   applyTheme(state.settings.theme);
   $$('#levelFilter .chip').forEach(c=>c.classList.toggle('active',c.dataset.level===state.settings.level));
   renderCards();
+  
+  // Ініціалізація акаунту
+  await initAuth();
 })();
 </script>
 </body>
